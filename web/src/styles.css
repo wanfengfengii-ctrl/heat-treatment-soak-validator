@@ -37,6 +37,27 @@ h1 {
   padding: 1rem 1.25rem;
 }
 
+.upload input[type="text"] {
+  border: 1px solid #cfd4dc;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  padding: 0.45rem 0.6rem;
+  width: 11rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .upload label {
   font-weight: 600;
 }
@@ -107,4 +128,113 @@ h1 {
   color: #5a6372;
   font-weight: 400;
   margin-left: 0.4rem;
+}
+
+.verdict-source {
+  color: #5a6372;
+  font-size: 0.9rem;
+  margin: 0 0 0.75rem;
+}
+
+/* ---- 最近记录侧栏：空态/错误只留在列表区域 ---- */
+
+.side .history {
+  background: #fbfcfe;
+  border: 1px solid #e2e5ea;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+}
+
+.history h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.75rem;
+}
+
+.history-hint {
+  color: #8a93a2;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.history-error {
+  margin-top: 0;
+  padding: 0.75rem 1rem;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.history-item {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e2e5ea;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+}
+
+.history-item:hover {
+  border-color: #1f6feb;
+}
+
+.history-item:focus-visible {
+  outline: 2px solid #1f6feb;
+  outline-offset: 1px;
+}
+
+.history-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.history-name {
+  font-weight: 600;
+}
+
+.history-meta {
+  color: #5a6372;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-time {
+  color: #5a6372;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.badge {
+  border-radius: 999px;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.15rem 0.55rem;
+}
+
+.badge.ok {
+  background: #d9f2e2;
+  color: #1c6b35;
+}
+
+.badge.ng {
+  background: #fde4cf;
+  color: #97530c;
 }

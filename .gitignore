@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# 本地运行时的 SQLite 历史库（容器内位于命名卷 /app/data）
+api/data/
+*.db
+*.sqlite*
+
 # Node / 前端产物
 node_modules/
 dist/

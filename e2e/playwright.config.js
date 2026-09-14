@@ -4,6 +4,13 @@ import { defineConfig } from "@playwright/test";
 const baseURL =
   process.env.WEB_BASE_URL ?? `http://localhost:${process.env.WEB_PORT ?? 8080}`;
 
+// verify 容器内以 root 运行并挂载 Docker 套接字做真实重启；
+// root 启动 Chromium 必须关闭 setuid sandbox（一次性验收容器，可接受）
+const launchOptions =
+  typeof process.getuid === "function" && process.getuid() === 0
+    ? { args: ["--no-sandbox", "--disable-setuid-sandbox"] }
+    : {};
+
 export default defineConfig({
   testDir: ".",
   timeout: 30_000,
@@ -13,5 +20,6 @@ export default defineConfig({
   use: {
     baseURL,
     screenshot: "only-on-failure",
+    launchOptions,
   },
 });

@@ -1,9 +1,9 @@
 FROM node:22-bookworm
 
-# Python（跑 pytest）与基础工具
+# Python（跑 pytest）、docker CLI（端到端经宿主套接字重启 api）与基础工具
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       python3 python3-pip curl ca-certificates \
+       python3 python3-pip curl ca-certificates docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
