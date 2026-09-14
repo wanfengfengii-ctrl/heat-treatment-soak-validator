@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import { buildVerdict, validateFile } from "./lib/verdict";
+import { buildVerdict, parseJsonPreserveBigInts, validateFile } from "./lib/verdict";
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -26,7 +26,15 @@ export default function App() {
       const form = new FormData();
       form.append("file", file);
       const resp = await fetch("/api/analyze", { method: "POST", body: form });
-      const body = await resp.json().catch(() => null);
+      // 先取文本再自行解析：保留超出 JS 安全整数范围的时间戳（BigInt），
+      // 避免 resp.json() 精度丢失把相差 1800 秒的起止舍入成同一时刻
+      const text = await resp.text();
+      let body = null;
+      try {
+        body = text ? parseJsonPreserveBigInts(text) : null;
+      } catch {
+        body = null;
+      }
       if (!resp.ok) {
         // 整份拒绝：仅显示错误，旧结果已清除
         const message = body?.detail?.message ?? `服务器拒绝（HTTP ${resp.status}）`;

@@ -94,3 +94,16 @@ def test_huge_integer_timestamps_accepted():
     assert seg["startT"] == base
     assert seg["endT"] == base + 1800
     assert seg["duration"] == 1800
+
+
+def test_extreme_integer_timestamps_exact_roundtrip():
+    # 超出 JS 安全整数（2^53）的时间戳：响应必须保留精确数字，
+    # 前端依赖响应原文把起止还原成相差 1800 秒的两个不同值
+    base = 10**20
+    resp = upload([{"t": base + i * 30, "temp": 850} for i in range(61)])
+    assert resp.status_code == 200
+    seg = resp.json()["earliestQualifyingSegment"]
+    assert seg["startT"] == base
+    assert seg["endT"] == base + 1800
+    assert str(base) in resp.text
+    assert str(base + 1800) in resp.text

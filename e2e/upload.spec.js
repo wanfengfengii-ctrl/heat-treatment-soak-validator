@@ -104,3 +104,27 @@ test("超大合法整数时间戳：页面显示保温结论与达标段", async
   await expect(verdict).toContainText("t = 10000000001800");
   await expect(page.getByTestId("error")).toHaveCount(0);
 });
+
+test("超出安全整数的时间戳：起止保留相差1800秒的原始值", async ({ page }) => {
+  // 10^20 超出 JS 安全整数（2^53），朴素 JSON.parse 会把起止舍入成同一时刻
+  const base = 100000000000000000000n;
+  const body =
+    "[" +
+    Array.from(
+      { length: 61 },
+      (_, i) => `{"t": ${base + BigInt(i * 30)}, "temp": 850}`,
+    ).join(",") +
+    "]";
+  await page.locator("#record-file").setInputFiles({
+    name: "huge-bigint.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(body),
+  });
+  await page.getByRole("button", { name: "上传并分析" }).click();
+
+  const verdict = page.getByTestId("verdict");
+  await expect(page.getByTestId("verdict-headline")).toHaveText("保温合格");
+  await expect(verdict).toContainText("t = 100000000000000000000");
+  await expect(verdict).toContainText("t = 100000000000000001800");
+  await expect(page.getByTestId("error")).toHaveCount(0);
+});

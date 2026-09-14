@@ -3,6 +3,26 @@
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024; // 与后端 2 MiB 上限一致
 
+/**
+ * 解析 API 响应文本，把超出安全整数范围的整数还原为 BigInt。
+ * JSON.parse 会把 > 2^53 的整数舍入（例如相差 1800 秒的两个超大时间戳
+ * 被舍入成同一个数），必须借助 reviver 的 source 原文恢复精确值；
+ * 不支持 source 的旧环境静默降级为原行为。
+ */
+export function parseJsonPreserveBigInts(text) {
+  return JSON.parse(text, (key, value, context) => {
+    if (
+      typeof value === "number" &&
+      !Number.isSafeInteger(value) &&
+      typeof context?.source === "string" &&
+      /^-?\d+$/.test(context.source)
+    ) {
+      return BigInt(context.source);
+    }
+    return value;
+  });
+}
+
 /** 上传前预检；返回 null 表示可以提交，否则返回 { code, message }。 */
 export function validateFile(file) {
   if (!file) {
@@ -29,6 +49,7 @@ const pad2 = (n) => String(n).padStart(2, "0");
  * 超出 JS Date 可表示范围时返回 null（由调用方降级为原始秒数）。
  */
 export function formatTimestamp(t) {
+  if (typeof t === "bigint") return null; // 大整数必然超出 Date 可表示范围
   const ms = t * 1000;
   if (!Number.isFinite(ms)) return null;
   const date = new Date(ms);
@@ -45,8 +66,13 @@ export function formatTimestampOrRaw(t) {
   return formatTimestamp(t) ?? `t = ${t}`;
 }
 
-/** 时长（秒）→ "1800 秒（30 分钟）"。 */
+/** 时长（秒）→ "1800 秒（30 分钟）"；BigInt 时长按整除精确显示。 */
 export function formatDuration(seconds) {
+  if (typeof seconds === "bigint") {
+    return seconds % 60n === 0n
+      ? `${seconds} 秒（${seconds / 60n} 分钟）`
+      : `${seconds} 秒（约 ${(Number(seconds) / 60).toFixed(1)} 分钟）`;
+  }
   const minutes = seconds / 60;
   const minuteText = Number.isInteger(minutes)
     ? `${minutes} 分钟`
