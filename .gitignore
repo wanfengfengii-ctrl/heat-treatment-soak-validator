@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node / 前端产物
+node_modules/
+dist/
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/
+
+# 其他
+*.log
+.DS_Store
