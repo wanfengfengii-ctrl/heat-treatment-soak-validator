@@ -5,6 +5,7 @@ import {
   buildVerdict,
   formatDuration,
   formatTimestamp,
+  formatTimestampOrRaw,
   validateFile,
 } from "./verdict";
 
@@ -31,6 +32,18 @@ describe("formatTimestamp / formatDuration", () => {
   it("时间戳格式化为 UTC 文本", () => {
     expect(formatTimestamp(0)).toBe("1970-01-01 00:00:00 UTC");
     expect(formatTimestamp(1800)).toBe("1970-01-01 00:30:00 UTC");
+  });
+
+  it("超出 JS Date 范围的超大合法时间戳返回 null 而非抛异常", () => {
+    // 10^13 秒 × 1000 = 10^16 毫秒 > 8.64e15，toISOString 会抛 RangeError
+    expect(formatTimestamp(10_000_000_000_000)).toBeNull();
+    expect(formatTimestamp(-10_000_000_000_000)).toBeNull();
+    expect(formatTimestamp(Infinity)).toBeNull();
+  });
+
+  it("formatTimestampOrRaw 对超大时间戳退回原始秒数", () => {
+    expect(formatTimestampOrRaw(10_000_000_000_000)).toBe("t = 10000000000000");
+    expect(formatTimestampOrRaw(1800)).toBe("1970-01-01 00:30:00 UTC");
   });
 
   it("整分钟时长不带“约”", () => {
@@ -87,5 +100,37 @@ describe("buildVerdict 唯一结论", () => {
       longestSegment: null,
     });
     expect(verdict.status).toBe("unqualified");
+  });
+
+  it("超大整数时间戳的合格段不抛异常，起止退回原始秒数", () => {
+    const base = 10_000_000_000_000;
+    const verdict = buildVerdict({
+      qualified: true,
+      earliestQualifyingSegment: {
+        startT: base,
+        endT: base + 1800,
+        duration: 1800,
+        points: 61,
+      },
+      longestSegment: null,
+    });
+    expect(verdict.status).toBe("qualified");
+    const start = verdict.rows.find((r) => r.label === "达标段开始");
+    const end = verdict.rows.find((r) => r.label === "达标段结束");
+    expect(start.value).toBe("t = 10000000000000");
+    expect(start.raw).toBeUndefined();
+    expect(end.value).toBe("t = 10000000001800");
+  });
+
+  it("超大整数时间戳的不合格区间同样安全降级", () => {
+    const base = 10_000_000_000_000;
+    const verdict = buildVerdict({
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: { startT: base, endT: base + 270, duration: 270, points: 10 },
+    });
+    expect(verdict.status).toBe("unqualified");
+    const range = verdict.rows.find((r) => r.label === "最长有效段区间");
+    expect(range.value).toBe("t = 10000000000000 至 t = 10000000000270");
   });
 });

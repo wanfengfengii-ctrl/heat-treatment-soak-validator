@@ -81,3 +81,16 @@ def test_oversize_file_rejected():
 def test_missing_file_field_rejected():
     resp = client.post("/api/analyze")
     assert resp.status_code == 422
+
+
+def test_huge_integer_timestamps_accepted():
+    # 超大但合法的整数秒时间戳（超出 JS Date 可表示范围）必须正常判定
+    base = 10_000_000_000_000
+    resp = upload([{"t": base + i * 30, "temp": 850} for i in range(61)])
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["qualified"] is True
+    seg = data["earliestQualifyingSegment"]
+    assert seg["startT"] == base
+    assert seg["endT"] == base + 1800
+    assert seg["duration"] == 1800

@@ -87,3 +87,20 @@ test("非有限温度值整份拒绝", async ({ page }) => {
   await expect(page.getByTestId("error")).toBeVisible();
   await expect(page.getByTestId("verdict")).toHaveCount(0);
 });
+
+test("超大合法整数时间戳：页面显示保温结论与达标段", async ({ page }) => {
+  // 10^13 秒超出 JS Date 可表示范围，但属于合法整数时间戳
+  const base = 10_000_000_000_000;
+  const records = Array.from({ length: 61 }, (_, i) => ({
+    t: base + i * 30,
+    temp: 850,
+  }));
+  await uploadPayload(page, "huge.json", records);
+
+  const verdict = page.getByTestId("verdict");
+  await expect(page.getByTestId("verdict-headline")).toHaveText("保温合格");
+  await expect(verdict).toContainText("达标段开始");
+  await expect(verdict).toContainText("t = 10000000000000");
+  await expect(verdict).toContainText("t = 10000000001800");
+  await expect(page.getByTestId("error")).toHaveCount(0);
+});
