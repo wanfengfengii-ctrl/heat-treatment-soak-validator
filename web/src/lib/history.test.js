@@ -69,6 +69,45 @@ describe("mapHistoryItems 列表映射", () => {
     expect(mapHistoryItems(null)).toEqual([]);
     expect(mapHistoryItems(undefined)).toEqual([]);
   });
+
+  it("判定方式标明：线性等效与严格判定各有文案", () => {
+    const equiv = mapHistoryItem({
+      id: 1,
+      heatNo: "H-1",
+      filename: "a.json",
+      analyzedAt: 0,
+      qualified: true,
+      recordCount: 32,
+      analysisMode: "linear_equivalent",
+    });
+    expect(equiv.analysisMode).toBe("linear_equivalent");
+    expect(equiv.modeText).toBe("线性等效");
+
+    const strict = mapHistoryItem({
+      id: 2,
+      heatNo: "H-2",
+      filename: "b.json",
+      analyzedAt: 0,
+      qualified: false,
+      recordCount: 10,
+      analysisMode: "strict",
+    });
+    expect(strict.analysisMode).toBe("strict");
+    expect(strict.modeText).toBe("严格判定");
+  });
+
+  it("无模式的旧记录按严格判定展示", () => {
+    const legacy = mapHistoryItem({
+      id: 3,
+      heatNo: null,
+      filename: "legacy.json",
+      analyzedAt: 0,
+      qualified: true,
+      recordCount: 61,
+    });
+    expect(legacy.analysisMode).toBe("strict");
+    expect(legacy.modeText).toBe("严格判定");
+  });
 });
 
 describe("formatAnalyzedAt 服务端分析时间", () => {

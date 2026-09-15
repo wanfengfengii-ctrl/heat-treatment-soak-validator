@@ -1,7 +1,21 @@
 // 纯函数：把 API 分析结果映射为页面上的“唯一结论”视图模型，
 // 以及上传前的本地预检。判定本身由后端完成，这里只做呈现决策。
+// 判定模式：strict（严格判定，默认）与 linear_equivalent（线性曲线等效保温）；
+// 无模式的旧记录一律按严格判定读取。
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024; // 与后端 2 MiB 上限一致
+
+export const MODE_TEXT = {
+  strict: "严格判定",
+  linear_equivalent: "线性曲线等效保温",
+};
+
+/** 结论的判定模式；缺失或未知一律回落为严格判定（兼容旧记录）。 */
+export function analysisModeOf(analysis) {
+  return analysis?.analysisMode === "linear_equivalent"
+    ? "linear_equivalent"
+    : "strict";
+}
 
 /**
  * 解析 API 响应文本，把超出安全整数范围的整数还原为 BigInt。
@@ -90,11 +104,48 @@ function timeRow(label, t) {
 }
 
 /**
+ * 插值时刻 { anchorT, offsetSeconds } → 展示文本：
+ * 整数锚点按普通时刻格式化，非零偏移以「+ X.XXX 秒」附加，
+ * 锚点本身超出可表示范围时退回原始秒数。普通整数时刻原样通过。
+ */
+export function formatTimePoint(point) {
+  if (point === null || point === undefined) return "—";
+  if (typeof point === "object" && "anchorT" in point) {
+    const base = formatTimestampOrRaw(point.anchorT);
+    const offset = Number(point.offsetSeconds ?? 0);
+    return offset ? `${base} + ${offset.toFixed(3)} 秒` : base;
+  }
+  return formatTimestampOrRaw(point);
+}
+
+/** 插值时刻行：锚点可表示时给 UTC 文本（+ 偏移），否则退回原始秒数。 */
+function timePointRow(label, point) {
+  return { label, value: formatTimePoint(point) };
+}
+
+/** 等效秒 → "1800.000 秒"；非法输入安全降级。 */
+export function formatEquivalentSeconds(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n)) return "0.000 秒";
+  return `${n.toFixed(3)} 秒`;
+}
+
+/**
  * 由 API 分析结果生成唯一结论：
  * - 合格：给出最早达标段的起止时间；
  * - 不合格：给出最长有效段时长（无任何有效段时长为 0）。
+ * 线性等效模式下起止为插值时刻、时长口径换为累计等效秒。
  */
 export function buildVerdict(analysis) {
+  const mode = analysisModeOf(analysis);
+  const modeText = MODE_TEXT[mode];
+  if (mode === "linear_equivalent") {
+    return buildEquivalentVerdict(analysis, mode, modeText);
+  }
+  return { ...buildStrictVerdict(analysis), mode, modeText };
+}
+
+function buildStrictVerdict(analysis) {
   if (analysis.qualified && analysis.earliestQualifyingSegment) {
     const seg = analysis.earliestQualifyingSegment;
     return {
@@ -117,4 +168,35 @@ export function buildVerdict(analysis) {
     });
   }
   return { status: "unqualified", headline: "保温不合格", rows };
+}
+
+function buildEquivalentVerdict(analysis, mode, modeText) {
+  if (analysis.qualified && analysis.earliestQualifyingSegment) {
+    const seg = analysis.earliestQualifyingSegment;
+    return {
+      status: "qualified",
+      headline: "保温合格",
+      mode,
+      modeText,
+      rows: [
+        timePointRow("达标段开始", seg.startT),
+        timePointRow("首次达标时刻", seg.endT),
+        { label: "累计等效秒", value: formatEquivalentSeconds(seg.equivalentSeconds) },
+      ],
+    };
+  }
+  const longest = analysis.longestSegment;
+  const rows = [
+    {
+      label: "最长段累计等效秒",
+      value: formatEquivalentSeconds(longest ? longest.equivalentSeconds : 0),
+    },
+  ];
+  if (longest) {
+    rows.push({
+      label: "最长有效段区间",
+      value: `${formatTimePoint(longest.startT)} 至 ${formatTimePoint(longest.endT)}`,
+    });
+  }
+  return { status: "unqualified", headline: "保温不合格", mode, modeText, rows };
 }

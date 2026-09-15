@@ -6,12 +6,27 @@
 
 ## 判定规则
 
+上传时可选择判定方式（`analysis_mode`），默认**严格判定**（strict）：
+
 - 有效保温段由**连续记录**构成：每条温度都落在闭区间 **840–860 °C**，且任意
   相邻记录时间差不超过 **60 秒**；一次越界或超间隔立即切段。
 - 段持续时间 = 末项 `t` − 首项 `t`，达到 **1800 秒**即合格。
-- 页面只显示**唯一结论**：
-  - 合格 → 给出**最早达标段**的起止时间；
-  - 不合格 → 给出**最长有效段**的时长。
+
+边界附近缓慢升温的炉次可选**线性曲线等效保温**（linear_equivalent）：
+
+- 60 秒内的相邻点连成线段，裁剪 **840–860 °C** 的时间片，对片内
+  `2^((温度-850)/10)` 按时间积分（恒温片按常量积分）。
+- 带外区间或超 60 秒间隔结束连续段；落在边界的相邻片按同一时刻拼接，
+  不重复计时。
+- 连续段累计等效秒达到 **1800** 即合格，取最早达标段；首次达标时刻用指数
+  积分的解析反函数求得，以**整数锚点 + 十进制秒偏移**表示
+  （`{"anchorT": …, "offsetSeconds": …}`），超大时间戳不丢失精度。
+
+页面只显示**唯一结论**：
+
+- 合格 → 给出**最早达标段**的起止时间（等效模式为段起点与首次达标时刻、
+  累计等效秒）；
+- 不合格 → 给出**最长有效段**的时长（等效模式为最长段累计等效秒）。
 
 ## 上传文件要求（任一不满足即整份拒绝并清除旧结果）
 
@@ -31,7 +46,7 @@
 ```
 compose.yaml          # 一键启动：api + web + verify（api 的 SQLite 在命名卷 api-history）
 api/                  # FastAPI 后端
-  app/soak.py         #   解析校验 + 保温段判定（纯函数）
+  app/soak.py         #   解析校验 + 保温段判定（严格/线性等效，纯函数）
   app/storage.py      #   SQLite 历史记录读写（成功分析落库、最近二十条、按 id 恢复）
   app/main.py         #   POST /api/analyze、GET /api/history、GET /api/history/{id}
   tests/              #   pytest：解析、区间判定、临时库持久化与兼容判据
@@ -78,22 +93,28 @@ WEB_PORT=8080 npx playwright test
 
 ## API
 
-`POST /api/analyze`（multipart 字段 `file`，可选字段 `heat_no` 炉次号）
+`POST /api/analyze`（multipart 字段 `file`，可选字段 `heat_no` 炉次号、
+`analysis_mode` 判定方式 `strict`/`linear_equivalent`，缺省为 `strict`）
 
-- `200`：`{ qualified, earliestQualifyingSegment, longestSegment, recordCount, ..., historyId }`
+- `200`：`{ analysisMode, qualified, earliestQualifyingSegment, longestSegment, recordCount, ..., historyId }`
   —— **只有校验通过的成功分析**才写入本地 SQLite，并在原响应中追加记录标识
-  `historyId`；不带 `heat_no` 的旧客户端请求行为完全不变。
-- `422`：`{ detail: { code, message } }` —— 格式错误、缺字段、乱序、非有限值、
-  记录数或文件大小超限等，**整份拒绝且不留历史**。
+  `historyId`；结论快照记录判定模式与等效秒（等效模式的段起止为
+  `{anchorT, offsetSeconds}` 插值时刻）。不带 `analysis_mode` 的旧客户端
+  请求行为完全不变（按严格判定）。
+- `422`：`{ detail: { code, message } }` —— 未知判定模式
+  （`unknown_analysis_mode`，**先于文件解析**返回）、格式错误、缺字段、乱序、
+  非有限值、记录数或文件大小超限等，**整份拒绝且不留历史**。
 - `500`：`{ detail: { code: "history_write_failed"|"history_unavailable", message } }`
   —— 持久化失败时本次分析返回明确错误，响应体不含未落库结论。
 
-`GET /api/history` —— 按服务端分析时间倒序（同时间以 id 倒序）取最近二十条摘要：
+`GET /api/history` —— 按服务端分析时间倒序（同时间以 id 倒序）取最近二十条摘要，
+每条标明判定方式 `analysisMode`（无模式的旧记录按 `strict` 读取）：
 
 ```json
 { "items": [
   { "id": 3, "heatNo": "H-2026-001", "filename": "a.json",
-    "analyzedAt": 1789000205.4, "qualified": true, "recordCount": 61 } ] }
+    "analyzedAt": 1789000205.4, "qualified": true, "recordCount": 61,
+    "analysisMode": "strict" } ] }
 ```
 
 `GET /api/history/{id}` —— 恢复一条记录当时的**完整结论**（用于驱动唯一结论）；

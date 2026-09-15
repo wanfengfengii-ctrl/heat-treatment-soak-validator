@@ -7,7 +7,14 @@ import os
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from .soak import MAX_FILE_BYTES, Rejection, analyze, parse_payload
+from .soak import (
+    ANALYSIS_MODES,
+    DEFAULT_MODE,
+    MAX_FILE_BYTES,
+    Rejection,
+    analyze,
+    parse_payload,
+)
 from .storage import (
     DEFAULT_DB_PATH,
     StorageError,
@@ -45,8 +52,25 @@ def health() -> dict:
 async def analyze_file(
     file: UploadFile = File(...),
     heat_no: str | None = Form(default=None),
+    analysis_mode: str | None = Form(default=None),
     conn=Depends(get_conn),
 ):
+    # 未知判定模式先于文件解析返回 422；旧请求不带模式，按严格判定处理
+    mode = analysis_mode if analysis_mode else DEFAULT_MODE
+    if mode not in ANALYSIS_MODES:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "code": "unknown_analysis_mode",
+                    "message": (
+                        f"未知判定模式: {analysis_mode}，"
+                        f"可选值为 {' / '.join(ANALYSIS_MODES)}"
+                    ),
+                }
+            },
+        )
+
     # 多读 1 字节以识别超限文件，避免无界读取
     raw = await file.read(MAX_FILE_BYTES + 1)
     try:
@@ -58,7 +82,7 @@ async def analyze_file(
             content={"detail": {"code": rej.code, "message": rej.message}},
         )
 
-    conclusion = analyze(records)
+    conclusion = analyze(records, mode=mode)
 
     # 先落库再返回：持久化失败时本次分析返回明确错误，且不展示未落库结论
     try:

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_FILE_BYTES,
+  analysisModeOf,
   buildVerdict,
   formatDuration,
+  formatEquivalentSeconds,
+  formatTimePoint,
   formatTimestamp,
   formatTimestampOrRaw,
   parseJsonPreserveBigInts,
@@ -189,5 +192,132 @@ describe("buildVerdict 唯一结论", () => {
     expect(start.value).toBe("t = 100000000000000000000");
     expect(end.value).toBe("t = 100000000000000001800");
     expect(start.value).not.toBe(end.value);
+  });
+});
+
+describe("analysisModeOf 判定模式识别", () => {
+  it("缺省与未知模式一律按严格判定读取（旧记录兼容）", () => {
+    expect(analysisModeOf({})).toBe("strict");
+    expect(analysisModeOf({ analysisMode: "strict" })).toBe("strict");
+    expect(analysisModeOf({ analysisMode: "fuzzy" })).toBe("strict");
+    expect(analysisModeOf(null)).toBe("strict");
+    expect(analysisModeOf(undefined)).toBe("strict");
+  });
+
+  it("线性等效模式原样识别", () => {
+    expect(analysisModeOf({ analysisMode: "linear_equivalent" })).toBe(
+      "linear_equivalent",
+    );
+  });
+});
+
+describe("formatTimePoint 插值时刻（整数锚点 + 十进制秒偏移）", () => {
+  it("零偏移等同普通整数时刻", () => {
+    expect(formatTimePoint({ anchorT: 1800, offsetSeconds: 0 })).toBe(
+      "1970-01-01 00:30:00 UTC",
+    );
+  });
+
+  it("非零偏移以 + X.XXX 秒附加", () => {
+    expect(formatTimePoint({ anchorT: 1800, offsetSeconds: 38.359574 })).toBe(
+      "1970-01-01 00:30:00 UTC + 38.360 秒",
+    );
+  });
+
+  it("超大锚点退回原始秒数且不丢精度", () => {
+    expect(
+      formatTimePoint({ anchorT: 10_000_000_000_000, offsetSeconds: 12.5 }),
+    ).toBe("t = 10000000000000 + 12.500 秒");
+    expect(
+      formatTimePoint({ anchorT: 100000000000000000000n, offsetSeconds: 0 }),
+    ).toBe("t = 100000000000000000000");
+  });
+
+  it("普通整数时刻与空值安全通过", () => {
+    expect(formatTimePoint(1800)).toBe("1970-01-01 00:30:00 UTC");
+    expect(formatTimePoint(null)).toBe("—");
+  });
+});
+
+describe("formatEquivalentSeconds 等效秒", () => {
+  it("保留三位小数", () => {
+    expect(formatEquivalentSeconds(1800)).toBe("1800.000 秒");
+    expect(formatEquivalentSeconds(32.46063842)).toBe("32.461 秒");
+  });
+
+  it("非法输入安全降级", () => {
+    expect(formatEquivalentSeconds(undefined)).toBe("0.000 秒");
+    expect(formatEquivalentSeconds(NaN)).toBe("0.000 秒");
+  });
+});
+
+describe("buildVerdict 线性曲线等效保温", () => {
+  const qualifiedAnalysis = {
+    analysisMode: "linear_equivalent",
+    qualified: true,
+    earliestQualifyingSegment: {
+      startT: { anchorT: 0, offsetSeconds: 30 },
+      endT: { anchorT: 1800, offsetSeconds: 38.3595743866656 },
+      equivalentSeconds: 1800,
+      slices: 31,
+    },
+    longestSegment: null,
+  };
+
+  it("合格时给出达标段开始、首次达标时刻与累计等效秒", () => {
+    const verdict = buildVerdict(qualifiedAnalysis);
+    expect(verdict.status).toBe("qualified");
+    expect(verdict.headline).toBe("保温合格");
+    expect(verdict.mode).toBe("linear_equivalent");
+    expect(verdict.modeText).toBe("线性曲线等效保温");
+    const start = verdict.rows.find((r) => r.label === "达标段开始");
+    const reach = verdict.rows.find((r) => r.label === "首次达标时刻");
+    const equiv = verdict.rows.find((r) => r.label === "累计等效秒");
+    expect(start.value).toBe("1970-01-01 00:00:00 UTC + 30.000 秒");
+    expect(reach.value).toBe("1970-01-01 00:30:00 UTC + 38.360 秒");
+    expect(equiv.value).toBe("1800.000 秒");
+  });
+
+  it("不合格时给出最长段累计等效秒与插值区间", () => {
+    const verdict = buildVerdict({
+      analysisMode: "linear_equivalent",
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: {
+        startT: { anchorT: 0, offsetSeconds: 15 },
+        endT: { anchorT: 0, offsetSeconds: 45 },
+        equivalentSeconds: 32.46063842000167,
+        slices: 1,
+      },
+    });
+    expect(verdict.status).toBe("unqualified");
+    expect(verdict.modeText).toBe("线性曲线等效保温");
+    const equiv = verdict.rows.find((r) => r.label === "最长段累计等效秒");
+    expect(equiv.value).toBe("32.461 秒");
+    const range = verdict.rows.find((r) => r.label === "最长有效段区间");
+    expect(range.value).toBe(
+      "1970-01-01 00:00:00 UTC + 15.000 秒 至 1970-01-01 00:00:00 UTC + 45.000 秒",
+    );
+  });
+
+  it("无任何有效段时等效秒为 0", () => {
+    const verdict = buildVerdict({
+      analysisMode: "linear_equivalent",
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: null,
+    });
+    expect(verdict.rows[0].value).toBe("0.000 秒");
+  });
+
+  it("无模式的旧记录按严格判定读取", () => {
+    const verdict = buildVerdict({
+      qualified: true,
+      earliestQualifyingSegment: { startT: 0, endT: 1800, duration: 1800, points: 61 },
+      longestSegment: null,
+    });
+    expect(verdict.mode).toBe("strict");
+    expect(verdict.modeText).toBe("严格判定");
+    expect(verdict.rows.map((r) => r.label)).toContain("达标段时长");
   });
 });

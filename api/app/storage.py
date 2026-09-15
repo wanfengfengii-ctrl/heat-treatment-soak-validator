@@ -101,6 +101,8 @@ def _row_to_summary(row: sqlite3.Row) -> dict:
         "analyzedAt": row["analyzed_at"],
         "qualified": bool(conclusion.get("qualified")),
         "recordCount": conclusion.get("recordCount"),
+        # 无模式的旧记录按严格判定读取
+        "analysisMode": conclusion.get("analysisMode", "strict"),
     }
 
 

@@ -204,8 +204,10 @@ def test_history_summary_shape(client):
     item = c.get("/api/history").json()["items"][0]
     assert set(item.keys()) == {
         "id", "heatNo", "filename", "analyzedAt", "qualified", "recordCount",
+        "analysisMode",
     }
     assert item["recordCount"] == 61
+    assert item["analysisMode"] == "strict"
 
 
 def test_write_failure_returns_clear_error_and_no_partial_record(client, monkeypatch):

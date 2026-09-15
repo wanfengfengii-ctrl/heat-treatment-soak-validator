@@ -23,6 +23,9 @@ export function formatAnalyzedAt(epochSeconds) {
 export function mapHistoryItem(item) {
   const heatNo = item.heatNo == null ? null : String(item.heatNo);
   const count = item.recordCount == null ? NaN : Number(item.recordCount);
+  // 无模式的旧记录按严格判定展示
+  const mode =
+    item.analysisMode === "linear_equivalent" ? "linear_equivalent" : "strict";
   return {
     id: item.id,
     heatNo,
@@ -31,6 +34,8 @@ export function mapHistoryItem(item) {
     qualified: Boolean(item.qualified),
     statusText: item.qualified ? "合格" : "不合格",
     recordCountText: Number.isFinite(count) ? `${count} 条记录` : "",
+    analysisMode: mode,
+    modeText: mode === "linear_equivalent" ? "线性等效" : "严格判定",
     analyzedAtText: formatAnalyzedAt(item.analyzedAt),
   };
 }
