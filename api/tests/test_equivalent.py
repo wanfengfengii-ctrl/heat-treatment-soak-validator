@@ -195,6 +195,64 @@ def test_huge_timestamp_anchor_stays_exact():
 
 
 # ---------------------------------------------------------------------------
+# 数值稳定性：极小波动与极端有限温度
+# ---------------------------------------------------------------------------
+
+
+def test_tiny_fluctuation_around_850_not_undercounted():
+    """850 °C 附近极小波动：速率差灾难性相消不得少算等效保温。
+
+    每 30 秒一点、在 850±1e-9 间交替，真实等效秒 ≈ 1800（速率≈1）；
+    直接对 (r(Tb)-r(Ta))/(Tb-Ta) 求差会丢精度，把足额保温判成不合格。
+    """
+    for eps in (1e-9, 1e-12):
+        records = [
+            Record(t=30 * i, temp=850.0 + (eps if i % 2 else -eps))
+            for i in range(61)
+        ]
+        result = equiv(records)
+        assert result["qualified"] is True, f"eps={eps}"
+        longest = result["longestSegment"]
+        assert abs(longest["equivalentSeconds"] - 1800.0) <= TOL
+        seg = result["earliestQualifyingSegment"]
+        assert abs(seg["equivalentSeconds"] - MIN_SOAK_SECONDS) <= TOL
+
+
+def _assert_all_finite(value):
+    """递归断言结论中的数值全部为有限值。"""
+    if isinstance(value, dict):
+        for item in value.values():
+            _assert_all_finite(item)
+    elif isinstance(value, list):
+        for item in value:
+            _assert_all_finite(item)
+    elif isinstance(value, float):
+        assert math.isfinite(value), f"非有限值: {value}"
+
+
+def test_extreme_finite_temperatures_yield_finite_conclusion():
+    """极低有限值跨到极高有限值：结论必须有限（无 NaN/inf 进入快照）。"""
+    for temps in ((-1e308, 1e308), (1e308, -1e308)):
+        records = [Record(t=0, temp=temps[0]), Record(t=60, temp=temps[1])]
+        result = equiv(records)
+        assert result["qualified"] is False
+        _assert_all_finite(result)
+        longest = result["longestSegment"]
+        # 穿越 840–860 °C 的窗口约 6e-307 秒，等效秒≈0
+        assert longest is not None
+        assert abs(longest["equivalentSeconds"]) <= TOL
+
+
+def test_one_sided_extreme_temperature_finite_slice():
+    """单侧极端温度：片窗口极小但有限，结论全部有限。"""
+    records = [Record(t=0, temp=850.0), Record(t=60, temp=1e308)]
+    result = equiv(records)
+    assert result["qualified"] is False
+    _assert_all_finite(result)
+    assert abs(result["longestSegment"]["equivalentSeconds"]) <= TOL
+
+
+# ---------------------------------------------------------------------------
 # 模式分发与旧行为兼容
 # ---------------------------------------------------------------------------
 

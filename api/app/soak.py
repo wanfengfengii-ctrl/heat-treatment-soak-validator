@@ -170,11 +170,26 @@ def _analyze_strict(records: list[Record]) -> dict:
 # ---------------------------------------------------------------------------
 
 _LN2 = math.log(2.0)
+_RATE_K = _LN2 / 10.0  # 2^((T-850)/10) 换底为自然指数后的系数
 
 
 def _rate(temp: float) -> float:
     """等效速率 2^((temp-850)/10)：850 °C 时为 1，每偏离 10 °C 减半/翻倍。"""
     return 2.0 ** ((temp - 850.0) / 10.0)
+
+
+def _crossing_offset(temp0: float, temp1: float, target: float, gap: int) -> float:
+    """线性温度达到 target 时相对线段左端的秒偏移。
+
+    直接写 (target - temp0) * gap / (temp1 - temp0) 在极端有限温度下会溢出
+    （如 ±1e308 时温差本身已是 inf）：先除后乘；温差溢出时把各项减半再求
+    比例（比例不变，减半后的差值必有限）。
+    """
+    span = temp1 - temp0
+    if math.isfinite(span):
+        return (target - temp0) / span * gap
+    half0, half1, half_target = temp0 / 2.0, temp1 / 2.0, target / 2.0
+    return (half_target - half0) / (half1 - half0) * gap
 
 
 def _line_slice(
@@ -188,22 +203,25 @@ def _line_slice(
     if temp0 == temp1:
         # 恒温线段且温度在带内：整段成片
         return (t0, 0.0, float(gap), temp0, temp1)
-    # 温度关于偏移线性：T(o) = temp0 + (temp1 - temp0) * o / gap
+    # 片端点温度按构造直接取端点温度或带边界，不做插值回算：
+    # 既精确，也避免极端温度下 inf/NaN 进入后续积分
     oa, ob = 0.0, float(gap)
+    temp_a, temp_b = temp0, temp1
     if lo < TEMP_LOW:
-        o_low = (TEMP_LOW - temp0) * gap / (temp1 - temp0)
+        o = _crossing_offset(temp0, temp1, TEMP_LOW, gap)
         if temp0 < temp1:
-            oa = o_low
+            oa, temp_a = o, TEMP_LOW
         else:
-            ob = o_low
+            ob, temp_b = o, TEMP_LOW
     if hi > TEMP_HIGH:
-        o_high = (TEMP_HIGH - temp0) * gap / (temp1 - temp0)
+        o = _crossing_offset(temp0, temp1, TEMP_HIGH, gap)
         if temp0 < temp1:
-            ob = o_high
+            ob, temp_b = o, TEMP_HIGH
         else:
-            oa = o_high
-    temp_a = temp0 + (temp1 - temp0) * oa / gap
-    temp_b = temp0 + (temp1 - temp0) * ob / gap
+            oa, temp_a = o, TEMP_HIGH
+    if ob < oa:
+        # 温度带窗口窄到偏移无法分辨（极端温差下的舍入），按无片处理
+        return None
     return (t0, oa, ob, temp_a, temp_b)
 
 
@@ -211,15 +229,18 @@ def _integrate_slice(duration: float, temp_a: float, temp_b: float) -> float:
     """片内 2^((T-850)/10) 对时间的积分（等效秒），温度线性变化。"""
     if duration <= 0.0:
         return 0.0
-    if temp_a == temp_b:
+    delta = temp_b - temp_a
+    if delta == 0.0:
         # 恒温片按常量积分
         return _rate(temp_a) * duration
-    # 解析积分：T 线性 ⇒ 被积函数为指数函数
+    # 解析积分的数值稳定形：∫ = d·r(Ta)·expm1(kΔT)/(kΔT)。
+    # 直接写 (r(Tb)-r(Ta))/(Tb-Ta) 在 ΔT 极小时灾难性相消，
+    # 会把 850 °C 附近微小波动的足额等效保温少算成不合格
     return (
         duration
-        / (temp_b - temp_a)
-        * (10.0 / _LN2)
-        * (_rate(temp_b) - _rate(temp_a))
+        * _rate(temp_a)
+        * math.expm1(_RATE_K * delta)
+        / (_RATE_K * delta)
     )
 
 
@@ -227,13 +248,14 @@ def _offset_to_reach(
     oa: float, ob: float, temp_a: float, temp_b: float, need: float
 ) -> float:
     """从片头累计 need 等效秒的时刻偏移（指数积分的解析反函数）。"""
-    if temp_a == temp_b:
-        return oa + need / _rate(temp_a)
     duration = ob - oa
-    coeff = duration / (temp_b - temp_a) * (10.0 / _LN2)
-    rate_target = _rate(temp_a) + need / coeff
-    temp_target = 850.0 + 10.0 * math.log2(rate_target)
-    return oa + (temp_target - temp_a) * duration / (temp_b - temp_a)
+    delta = temp_b - temp_a
+    if delta == 0.0:
+        return oa + need / _rate(temp_a)
+    # 数值稳定形：u = log1p(x)/(kΔT)，x = need·kΔT/(r(Ta)·d)；
+    # ΔT 极小时 log1p 保持精度，极限退化为恒温片的 need/rate
+    x = need * _RATE_K * delta / (_rate(temp_a) * duration)
+    return oa + duration * math.log1p(x) / (_RATE_K * delta)
 
 
 def find_equivalent_segments(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from .soak import (
@@ -50,21 +50,29 @@ def health() -> dict:
 
 @app.post("/api/analyze")
 async def analyze_file(
+    request: Request,
     file: UploadFile = File(...),
     heat_no: str | None = Form(default=None),
-    analysis_mode: str | None = Form(default=None),
     conn=Depends(get_conn),
 ):
-    # 未知判定模式先于文件解析返回 422；旧请求不带模式，按严格判定处理
-    mode = analysis_mode if analysis_mode else DEFAULT_MODE
-    if mode not in ANALYSIS_MODES:
+    # 判定模式从原始表单读取：FastAPI 会把 Optional 表单字段的空串绑定成
+    # None，无法区分「未传」与「显式留空」。未传按严格判定（旧请求兼容）；
+    # 留空或未知值都是可识别的模式错误，先于文件解析返回 422。
+    form = await request.form()
+    raw_mode = form.get("analysis_mode")
+    if raw_mode is None:
+        mode = DEFAULT_MODE
+    elif isinstance(raw_mode, str) and raw_mode in ANALYSIS_MODES:
+        mode = raw_mode
+    else:
+        shown = raw_mode if isinstance(raw_mode, str) else type(raw_mode).__name__
         return JSONResponse(
             status_code=422,
             content={
                 "detail": {
                     "code": "unknown_analysis_mode",
                     "message": (
-                        f"未知判定模式: {analysis_mode}，"
+                        f"未知判定模式: {shown}，"
                         f"可选值为 {' / '.join(ANALYSIS_MODES)}"
                     ),
                 }

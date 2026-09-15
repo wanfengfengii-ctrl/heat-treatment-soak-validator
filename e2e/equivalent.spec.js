@@ -128,3 +128,48 @@ test("等效模式上传后，历史摘要标明判定方式", async ({ page }) 
 
   await expect(heatItem(page, "H-EQUIV-LIST")).toContainText("线性等效");
 });
+
+test("等效模式：850 °C 附近极小波动，足额等效保温不少算", async ({ page }) => {
+  // 每 30 秒一点，在 850±1e-9 间交替：速率≈1，等效秒应≈1800 判合格
+  const records = Array.from({ length: 61 }, (_, i) => ({
+    t: 30 * i,
+    temp: 850 + (i % 2 ? 1e-9 : -1e-9),
+  }));
+  await selectMode(page, "线性曲线等效保温");
+  await uploadPayload(page, "tiny-fluctuation.json", records);
+
+  const verdict = page.getByTestId("verdict");
+  await expect(page.getByTestId("verdict-headline")).toHaveText("保温合格");
+  await expect(verdict).toContainText("1800.000 秒");
+  await expect(page.getByTestId("error")).toHaveCount(0);
+});
+
+test("等效模式：极低到极高有限温度，返回有限结论且记录可回看", async ({ page }) => {
+  // -1e308 → 1e308 单线段：穿越窗口约 6e-307 秒，等效秒≈0，判不合格
+  await selectMode(page, "线性曲线等效保温");
+  await page.locator("#record-file").setInputFiles({
+    name: "extreme.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify([
+        { t: 0, temp: -1e308 },
+        { t: 60, temp: 1e308 },
+      ]),
+    ),
+  });
+  await page.locator("#heat-no").fill("H-EXTREME");
+  await page.getByRole("button", { name: "上传并分析" }).click();
+
+  // 页面显示有限的唯一结论，而不是服务错误
+  const verdict = page.getByTestId("verdict");
+  await expect(page.getByTestId("verdict-headline")).toHaveText("保温不合格");
+  await expect(verdict).toContainText("最长段累计等效秒");
+  await expect(verdict).toContainText("0.000 秒");
+  await expect(page.getByTestId("error")).toHaveCount(0);
+
+  // 落库记录可回看：点击后恢复同一结论
+  await heatItem(page, "H-EXTREME").click();
+  await expect(page.getByTestId("verdict-headline")).toHaveText("保温不合格");
+  await expect(page.getByTestId("verdict-source")).toContainText("H-EXTREME");
+  await expect(page.getByTestId("verdict")).toContainText("0.000 秒");
+});

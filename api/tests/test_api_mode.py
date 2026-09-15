@@ -84,6 +84,40 @@ def test_unknown_mode_leaves_no_history(client):
     assert count == 0
 
 
+def test_blank_analysis_mode_rejected(client):
+    """显式留空 analysis_mode：返回可识别的模式错误，而非按严格判定落库。"""
+    c, db_path = client
+    resp = upload(c, ramp_series(), mode="")
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "unknown_analysis_mode"
+    with sqlite3.connect(db_path) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM analyses").fetchone()[0]
+    assert count == 0
+
+
+def test_extreme_temperatures_return_finite_conclusion(client):
+    """极低/极高有限温度：返回 200 与有限结论，记录落库且可回看。"""
+    c, _ = client
+    extreme = [{"t": 0, "temp": -1e308}, {"t": 60, "temp": 1e308}]
+    resp = upload(c, extreme, "extreme.json", mode="linear_equivalent")
+    assert resp.status_code == 200
+    # 响应必须是严格 JSON：不允许出现 NaN / Infinity 字面量
+    assert "NaN" not in resp.text
+    assert "Infinity" not in resp.text
+    data = resp.json()
+    assert data["qualified"] is False
+    longest = data["longestSegment"]
+    assert longest is not None
+    assert abs(longest["equivalentSeconds"]) <= 1e-3
+
+    # 落库记录可回看：详情同样是有限结论
+    detail = c.get(f"/api/history/{data['historyId']}")
+    assert detail.status_code == 200
+    assert "NaN" not in detail.text
+    saved = detail.json()["conclusion"]
+    assert saved["longestSegment"]["equivalentSeconds"] == longest["equivalentSeconds"]
+
+
 def test_history_summary_marks_analysis_mode(client):
     """历史摘要标明判定方式：两种模式各一条，倒序返回。"""
     c, _ = client
